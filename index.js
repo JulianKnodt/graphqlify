@@ -34,6 +34,27 @@ class Union {
     return this.values[0]
   }
   get type() {
+    return this.values.map(it => {
+      if (isPrimitive(it)) return Symbol.keyFor(it);
+      return it[name];
+    }).join(' | ');
+  }
+};
+
+class GraphQLArray {
+  constructor(...values) {
+    this.values = [...new Set(values)];
+    this[name] = rString();
+  }
+
+  get isArray() {
+    return this.values.length === 1;
+  }
+
+  get first() {
+    return this.values[0]
+  }
+  get type() {
     if (this.isArray) {
       if (isPrimitive(this.first)) return `[${ Symbol.keyFor(this.first) }!]`;
       return `[${this.first[name]}!]`;
@@ -43,15 +64,13 @@ class Union {
       return it[name];
     }).join(' | ');
   }
-};
+}
 
 const rString = () => Math.random().toString(36).substring(8);
 
 const getName = obj => {
   const result = obj.constructor.name;
-
-  if (result !== 'Object') return result;
-  return rString();
+  return result !== 'Object' ? result : rString();
 };
 
 const graphqlify = (obj) => {
@@ -67,20 +86,20 @@ const graphqlify = (obj) => {
   }
   if (obj === null) return nullSymbol;
   if (Array.isArray(obj)) {
-    // this really should only be one kind ever but in the end it might be a union
-    return new Union(...new Set(obj.map(graphqlify)));
+    // this really should only be one kind ever but in the end it might need a new union
+    return new GraphQLArray(...new Set(obj.map(graphqlify)));
   };
   // here we have an object
   const result = new GraphQLObject();
   result[name] = getName(obj);
-  for (let key in obj) {
-    result[key] = graphqlify(obj[key]);
-  }
-  return result;
+  return Object.keys(obj).reduce((acc, key) => 
+    Object.assign(acc, {[key]: graphqlify(obj[key])}),
+  result);
 };
 
-const combine = (...objs) => objs.reduce((acc, obj) => {
-  if (!(obj instanceof GraphQLObject)) return acc;
+const combine = (...objs) => objs
+  .filter(it => it instanceof GraphQLObject)
+  .reduce((acc, obj) => {
   for (let key in obj) {
     if (!acc.hasOwnProperty(key)) acc[key] = obj[key];
     else if (acc[key] != obj[key]) {
@@ -90,22 +109,18 @@ const combine = (...objs) => objs.reduce((acc, obj) => {
   return acc;
 }, new GraphQLObject());
 
-const fieldString = ({ name, type }) => {
-  return `${name}: ${type}`;
-};
+const fieldString = ({ name, type }) => `${name}: ${type}`;
 
 const stringify = g => {
-
   // test all the base case types
   switch (g) {
     case string:
     case boolean:
     case float:
-    case int: 
-      return Symbol.keyFor(g);
+    case int: return Symbol.keyFor(g);
   };
 
-  if (g instanceof Union && !g.isArray) return `union ${g[name]} = ${g.type}`;
+  if ((g instanceof Union || g instanceof GraphQLArray)  && !g.isArray) return `union ${g[name]} = ${g.type}`;
 
   const fields = [];
   const adtl = [];
@@ -121,23 +136,29 @@ const stringify = g => {
       case nullSymbol:
       case symbolSymbol:
       case fn:
-        fields.push({ name, type: "UNKNOWN" });
+        fields.push({ name: key, type: "UNKNOWN" });
         break;
       default:
         if (part instanceof GraphQLObject) {
           adtl.push(stringify(part));
           fields.push({ name: key, type: part[name] });
-          break;
-        } else if (part instanceof Union) {
-          part.values.forEach(v => {
-            if (!isPrimitive(v)) adtl.push(stringify(v));
-          });
-          if (part.isArray) {
-            fields.push({ name: key, type: part.type });
-          } else {
+        } else if (part instanceof GraphQLArray) {
+          part.values
+            .filter(it => !isPrimitive(it))
+            .forEach(it => adtl.push(stringify(it)))
+
+          if (part.isArray) fields.push({ name: key, type: part.type });
+          else {
             adtl.push(stringify(part));
             fields.push({ name: key, type: `[${part[name]}!]` });
           }
+        } else if (part instanceof Union) {
+          part.values
+            .filter(it => !isPrimitive(it))
+            .forEach(it => adtl.push(stringify(it)))
+
+          adtl.push(stringify(part));
+          fields.push({ name: key, type: part[name] });
         }
     }
   }
@@ -155,23 +176,27 @@ const randomInstance = g => {
   switch(g) {
     case string: return rString();
     case boolean: return !(~~(Math.random()*2))
-    case float: return (Math.random() * Number.MAX_SAFE_INTEGER);
+    case float: return (Math.random() * 10000);
     case int:  return ~~(Math.random() * Number.MAX_SAFE_INTEGER) - ~~(Math.random() * Number.MAX_SAFE_INTEGER);
     case fn: return (...args) => args;
     case nullSymbol: return null;
     case symbolSymbol: return Symbol.for(rString());
   };
 
-  if (g instanceof Union) {
-    if (!g.isArray) return randomInstance(randomElem(g.values));
+
+  if (g instanceof GraphQLArray) {
     return Array.from(new Array(~~(Math.random() * 10)), () => randomInstance(g.first));
   }
 
-  const result = {};
-  for (let key in g) {
-    result[key] = randomInstance(g[key]);
+  if (g instanceof Union) {
+    return randomInstance(randomElem(g.values));
   }
-  return result;
+
+  return Object.keys(g).reduce((acc, key) => Object.assign(acc, {[key]: randomInstance(g[key])}), {});
 }
+
+// const g = graphqlify({test: 3, other: 3.5, hasName: true, nil: null, name: "james", vals: [1,2,3,4], undef: undefined, oops: [{bruh: true}], items: ["key", {noop: false}], children: {name: "Jerry"}});
+// console.log(stringify(g));
+// console.log(randomInstance(g));
 
 module.exports = { graphqlify, combine, stringify, random: randomInstance, };
