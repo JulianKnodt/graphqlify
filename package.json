@@ -1,0 +1,14 @@
+{
+  "name": "@tomzer0/graphqlify",
+  "version": "0.0.2",
+  "description": "Turn a plain old javascript object into a graphql string",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "graphql"
+  ],
+  "author": "Julian Knodt <julianknodt@gmail.com>",
+  "license": "MIT"
+}
